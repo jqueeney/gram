@@ -113,7 +113,16 @@ def create_parser():
         help="algorithm name",
         type=str,
         default="gram",
-        choices=["gram", "gram_separate", "gram_modular", "contextual_rl", "robust_rl", "domain_rand"],
+        choices=[
+            "gram",
+            "gram_separate",
+            "gram_modular",
+            "robust_rl",
+            "contextual_rl",
+            "contextual_rl_noise",
+            "domain_rand",
+            "domain_rand_priv",
+        ],
     )
 
     parser.add_argument("--no_empirical_normalization", help="do not use empirical normalization", action="store_true")
@@ -143,7 +152,8 @@ def create_parser():
     parser.add_argument("--adversary_init_noise_std", help="adversary initial noise std", type=float, default=1.0)
 
     # -- context / history encoder
-    parser.add_argument("--robust_use_latent", help="use latent input for robust policy", action="store_true")
+    parser.add_argument("--robust_use_latent_actor", help="use latent input for robust policy", action="store_true")
+    parser.add_argument("--robust_use_latent_critic", help="use latent input for robust critic", action="store_true")
 
     parser.add_argument("--num_latent", type=int, default=8, help="number of latent dimensions for context encoding")
     parser.add_argument("--latent_detach_actor", help="detach latent in actor", action="store_true")
@@ -154,6 +164,10 @@ def create_parser():
     parser.add_argument("--context_encoder_clamp", help="clamp output of context encoder", action="store_true")
     parser.add_argument(
         "--context_encoder_clamp_value", help="value for context encoder clamping", type=float, default=1.0
+    )
+    parser.add_argument("--context_encoder_stochastic", help="use stochastic context encoder", action="store_true")
+    parser.add_argument(
+        "--context_encoder_noise_std", help="stochastic context encoder noise std", type=float, default=0.25
     )
 
     parser.add_argument(
@@ -446,7 +460,7 @@ def set_adversary_magnitude_by_alg(inputs_cfg, args_cli, eval_mode):
     if eval_mode:
         inputs_cfg.adversary_magnitude = 0.0
     else:
-        if (args_cli.alg_name == "contextual_rl") or (args_cli.alg_name == "domain_rand"):
+        if args_cli.alg_name.startswith("contextual_rl") or args_cli.alg_name.startswith("domain_rand"):
             inputs_cfg.adversary_magnitude = 0.0
         else:
             inputs_cfg.adversary_magnitude = args_cli.adversary_magnitude
@@ -467,6 +481,9 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
     agent_cfg.collect_data_mix = True
     agent_cfg.finetune_iterations = args_cli.finetune_iterations
     agent_cfg.policy.adversary_prob = args_cli.adversary_prob
+    agent_cfg.policy.robust_use_latent_actor = args_cli.robust_use_latent_actor
+    agent_cfg.policy.robust_use_latent_critic = args_cli.robust_use_latent_critic
+    agent_cfg.policy.context_encoder_stochastic = args_cli.context_encoder_stochastic
 
     if eval_mode:
         agent_cfg.policy.act_from_context = False
@@ -498,7 +515,16 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
         agent_cfg.robust_mask_reset_update = True
         agent_cfg.collect_data_mix = False
 
-    elif args_cli.alg_name == "contextual_rl":
+    elif args_cli.alg_name == "robust_rl":
+        if not agent_cfg.policy.robust_use_latent_actor:
+            agent_cfg.finetune_iterations = 0
+
+        if eval_mode:
+            agent_cfg.policy.act_inference_robust = True
+        else:
+            agent_cfg.robust_train_only = True
+
+    elif args_cli.alg_name.startswith("contextual_rl"):
         agent_cfg.policy.adversary_prob = 0.0
 
         if eval_mode:
@@ -506,24 +532,21 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
         else:
             agent_cfg.adapt_train_only = True
 
-    elif args_cli.alg_name == "robust_rl":
-        if not args_cli.robust_use_latent:
-            agent_cfg.finetune_iterations = 0
+        if args_cli.alg_name == "contextual_rl_noise":
+            agent_cfg.policy.context_encoder_stochastic = True
 
-        if eval_mode:
-            agent_cfg.policy.act_inference_robust = True
-        else:
-            agent_cfg.robust_train_only = True
-
-    elif args_cli.alg_name == "domain_rand":
+    elif args_cli.alg_name.startswith("domain_rand"):
         agent_cfg.policy.adversary_prob = 0.0
-        if not args_cli.robust_use_latent:
+        if not agent_cfg.policy.robust_use_latent_actor:
             agent_cfg.finetune_iterations = 0
 
         if eval_mode:
             agent_cfg.policy.act_inference_robust = True
         else:
             agent_cfg.robust_train_only = True
+
+        if args_cli.alg_name == "domain_rand_priv":
+            agent_cfg.policy.robust_use_latent_critic = True
 
     else:
         raise ValueError("invalid alg_name")
@@ -621,8 +644,6 @@ def parse_agent_cfg(task_name: str, args_cli: argparse.Namespace, eval_mode: boo
     agent_cfg.policy.adversary_init_noise_std = args_cli.adversary_init_noise_std
 
     # -- context / history encoder
-    agent_cfg.policy.robust_use_latent = args_cli.robust_use_latent
-
     agent_cfg.policy.num_latent = args_cli.num_latent
     agent_cfg.policy.latent_detach_actor = args_cli.latent_detach_actor
     agent_cfg.policy.latent_detach_critic = args_cli.latent_detach_critic
@@ -631,6 +652,7 @@ def parse_agent_cfg(task_name: str, args_cli: argparse.Namespace, eval_mode: boo
     agent_cfg.policy.obs_history_length = args_cli.obs_history_length
     agent_cfg.policy.context_encoder_clamp = args_cli.context_encoder_clamp
     agent_cfg.policy.context_encoder_clamp_value = args_cli.context_encoder_clamp_value
+    agent_cfg.policy.context_encoder_noise_std = args_cli.context_encoder_noise_std
 
     agent_cfg.policy.history_epinet_output_type = args_cli.history_epinet_output_type
     agent_cfg.policy.history_epinet_finetune_scale = not args_cli.no_history_epinet_finetune_scale

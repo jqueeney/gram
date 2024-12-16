@@ -51,6 +51,8 @@ class GRAMActorCritic(nn.Module):
         history_epinet_coef=1.0,
         context_encoder_clamp=False,
         context_encoder_clamp_value=1.0,
+        context_encoder_stochastic=False,
+        context_encoder_noise_std=0.25,
         history_encoder_hidden_dims=[512, 256, 128],
         activation="elu",
         init_noise_std=1.0,
@@ -66,7 +68,8 @@ class GRAMActorCritic(nn.Module):
         act_from_context=True,
         act_inference_adapt=False,
         act_inference_robust=False,
-        robust_use_latent=False,
+        robust_use_latent_actor=False,
+        robust_use_latent_critic=False,
         **kwargs,
     ):
         super().__init__()
@@ -135,6 +138,9 @@ class GRAMActorCritic(nn.Module):
         self.context_encoder = nn.Sequential(*context_layers)
 
         print(f"Context Encoder MLP: {self.context_encoder}")
+
+        self.context_encoder_stochastic = context_encoder_stochastic
+        self.context_encoder_noise_std = context_encoder_noise_std
 
         # History encoder
         self.obs_history_length = obs_history_length
@@ -261,7 +267,8 @@ class GRAMActorCritic(nn.Module):
         # -------------------------------------------------------------------- #
 
         self.robust_as_zeros = robust_as_zeros
-        self.robust_use_latent = robust_use_latent
+        self.robust_use_latent_actor = robust_use_latent_actor
+        self.robust_use_latent_critic = robust_use_latent_critic
 
         if self.robust_as_zeros:
             self.robust_actor = self.actor
@@ -271,11 +278,13 @@ class GRAMActorCritic(nn.Module):
             else:
                 self.robust_std = self.std
         else:
-            if self.robust_use_latent:
+            if self.robust_use_latent_actor:
                 mlp_input_dim_a_robust = num_actor_obs + num_latent
-                mlp_input_dim_c_robust = num_critic_obs + num_latent_critic
             else:
                 mlp_input_dim_a_robust = num_actor_obs
+            if self.robust_use_latent_critic:
+                mlp_input_dim_c_robust = num_critic_obs + num_latent_critic
+            else:
                 mlp_input_dim_c_robust = num_critic_obs
 
             # Robust policy
@@ -443,7 +452,7 @@ class GRAMActorCritic(nn.Module):
             robust_latent = torch.zeros_like(latent.detach())
             robust_actor_input = torch.cat([observations, robust_latent], dim=-1)
         else:
-            if self.robust_use_latent:
+            if self.robust_use_latent_actor:
                 robust_actor_input = actor_input
             else:
                 robust_actor_input = observations
@@ -525,7 +534,7 @@ class GRAMActorCritic(nn.Module):
                 robust_latent = torch.zeros_like(latent.detach())
                 robust_critic_input = torch.cat([critic_observations, robust_latent], dim=-1)
             else:
-                if self.robust_use_latent:
+                if self.robust_use_latent_critic:
                     robust_critic_input = critic_input
                 else:
                     robust_critic_input = critic_observations
@@ -548,6 +557,11 @@ class GRAMActorCritic(nn.Module):
         latent = self.context_encoder(context)
         if self.context_encoder_clamp:
             latent = latent.clamp(min=self.context_encoder_clamp_value * -1, max=self.context_encoder_clamp_value)
+
+        if self.context_encoder_stochastic:
+            latent_noise = torch.randn_like(latent.detach()) * self.context_encoder_noise_std
+            latent = latent + latent_noise
+
         return latent
 
     def encode_history(self, observations_history):

@@ -6,9 +6,20 @@ SPDX-License-Identifier: BSD-3-Clause
 
 # GRAM: Generalization in Deep RL with a Robust Adaptation Module
 
-This repository contains the official implementation for the paper *GRAM: Generalization in Deep RL with a Robust Adaptation Module*.
+This repository contains the official implementation for the paper [GRAM: Generalization in Deep RL with a Robust Adaptation Module](https://arxiv.org/pdf/2412.04323).
 
-GRAM is a deep RL framework that can generalize to both in-distribution (ID) and out-of-distribution (OOD) scenarios at deployment time within a single unified architecture.
+GRAM is a deep RL framework that can generalize to both in-distribution (ID) and out-of-distribution (OOD) environment dynamics at deployment time within a single unified architecture.
+
+If you use this repository, please cite our paper:
+
+```bibtex
+@misc{queeney_2024_gram,
+    title = {{GRAM}: Generalization in Deep {RL} with a Robust Adaptation Module},
+    author = {James Queeney and Xiaoyi Cai and Mouhacine Benosman and Jonathan P. How},
+    howpublished = {{arXiv}:2412.04323},
+    year = {2024}
+}
+```
 
 ## Setup
 
@@ -47,7 +58,7 @@ For more general installation instructions of Isaac Sim and Isaac Lab, see the [
 ## Training
 
 Policies can be trained by calling `train` on the command line. The main inputs to specify are:
-1. `alg_name`: training algorithm (`gram`, `contextual_rl`, `robust_rl`, `domain_rand`, `gram_separate`, `gram_modular`)
+1. `alg_name`: training algorithm (`gram`, `robust_rl`, `contextual_rl`, `contextual_rl_noise`, `domain_rand`, `domain_rand_priv`, `gram_separate`, `gram_modular`)
 2. `id_context`: ID context set for training (`base_id`, `base_id_frozen_joints`)
 
 For example, all results shown in the paper for the *Base ID* context set can be trained as follows:
@@ -56,14 +67,20 @@ For example, all results shown in the paper for the *Base ID* context set can be
 # GRAM
 python -u -m source.train --alg_name gram --id_context base_id
 
-# Contextual RL
-python -u -m source.train --alg_name contextual_rl --id_context base_id
-
 # Robust RL
 python -u -m source.train --alg_name robust_rl --id_context base_id
 
+# Contextual RL
+python -u -m source.train --alg_name contextual_rl --id_context base_id
+
+# Contextual RL + Noise
+python -u -m source.train --alg_name contextual_rl_noise --id_context base_id
+
 # Domain Randomization
 python -u -m source.train --alg_name domain_rand --id_context base_id
+
+# Domain Randomization with privileged critic
+python -u -m source.train --alg_name domain_rand_priv --id_context base_id
 
 # GRAM Ablation: separate ID and OOD data collection
 python -u -m source.train --alg_name gram_separate --id_context base_id
