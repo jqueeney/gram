@@ -1,6 +1,6 @@
 BSD 3-Clause License
 
-Copyright (c) 2024 Mitsubishi Electric Research Laboratories (MERL)
+Copyright (c) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

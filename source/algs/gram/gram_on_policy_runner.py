@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+# Copyright (C) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 # Copyright (C) 2021 ETH Zurich, NVIDIA CORPORATION
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import statistics
 import time
@@ -118,6 +119,18 @@ class GRAMOnPolicyRunner(OnPolicyRunner):
         self.current_learning_iteration = 0
         self.git_status_repos = list()
 
+        # Actor critic config for saving
+        self.actor_critic_cfg = copy.deepcopy(self.policy_cfg)
+        self.actor_critic_cfg["num_actor_obs"] = num_obs
+        self.actor_critic_cfg["num_critic_obs"] = num_critic_obs
+        self.actor_critic_cfg["num_actions"] = self.env.num_actions
+        self.actor_critic_cfg["num_context"] = num_context
+
+        # Hardware config for saving
+        self.hardware_cfg = dict()
+        self.hardware_cfg["joint_pos_clamp"] = self.cfg["joint_pos_clamp"]
+        self.hardware_cfg["hip_scale_mult"] = self.cfg["hip_scale_mult"]
+
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path)
 
@@ -149,6 +162,10 @@ class GRAMOnPolicyRunner(OnPolicyRunner):
             "optimizer_state_dict": self.alg.optimizer.state_dict(),
             "iter": self.current_learning_iteration,
             "infos": infos,
+            "alg_name": self.cfg["alg_name"],
+            "hardware_cfg": self.hardware_cfg,
+            "actor_critic_cfg": self.actor_critic_cfg,
+            "empirical_normalization": self.empirical_normalization,
         }
         if self.empirical_normalization:
             saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()

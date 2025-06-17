@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+# Copyright (C) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 # Copyright (C) 2022-2024, The Isaac Lab Project Developers
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -50,9 +50,7 @@ def create_parser():
 
     # -- task arguments
     parser.add_argument("--task", type=str, default="Isaac-Velocity-Custom-Unitree-Go2-v0", help="Name of the task.")
-    parser.add_argument(
-        "--id_context", help="ID context set", type=str, default="base_id", choices=["base_id", "base_id_frozen_joints"]
-    )
+    parser.add_argument("--id_context", help="ID context set", type=str, default="default", choices=["default", "wide"])
 
     # -- evaluation arguments
     parser.add_argument(
@@ -119,9 +117,7 @@ def create_parser():
             "gram_modular",
             "robust_rl",
             "contextual_rl",
-            "contextual_rl_noise",
             "domain_rand",
-            "domain_rand_priv",
         ],
     )
 
@@ -153,7 +149,9 @@ def create_parser():
 
     # -- context / history encoder
     parser.add_argument("--robust_use_latent_actor", help="use latent input for robust policy", action="store_true")
-    parser.add_argument("--robust_use_latent_critic", help="use latent input for robust critic", action="store_true")
+    parser.add_argument(
+        "--no_robust_use_latent_critic", help="do not use latent input for robust critic", action="store_true"
+    )
 
     parser.add_argument("--num_latent", type=int, default=8, help="number of latent dimensions for context encoding")
     parser.add_argument("--latent_detach_actor", help="detach latent in actor", action="store_true")
@@ -248,6 +246,7 @@ def create_parser():
 
     # terrain
     parser.add_argument("--terrain_roughness_cm", help="terrain roughness (cm)", type=float)
+    parser.add_argument("--terrain_slope_degrees", help="terrain slope in degrees", type=float)
     parser.add_argument("--enable_height_scan", help="enable height scan", action="store_true")
 
     # frozen joints
@@ -256,7 +255,7 @@ def create_parser():
         help="frozen joint type for evaluation",
         type=str,
         default="none",
-        choices=["none", "hip", "thigh", "calf"],
+        choices=["none", "hip", "thigh", "calf", "all", "custom"],
     )
 
     # base mass
@@ -294,7 +293,12 @@ def create_parser():
         "--motor_strength_mult_context_scale_max", help="max motor strength multiple for context scaling", type=float
     )
 
+    parser.add_argument("--motor_Kp", help="motor Kp gain for PD controller", type=float)
+    parser.add_argument("--motor_Kd", help="motor Kd gain for PD controller", type=float)
+
     # action scale
+    parser.add_argument("--hip_scale_mult", help="hip scale multiplicative factor", type=float, default=0.5)
+
     parser.add_argument("--action_mult_indices", nargs="+", action="append", help="action mult indices", type=int)
     parser.add_argument("--action_mult_min", help="action mult min for active indices", type=float)
     parser.add_argument("--action_mult_max", help="action mult max for active indices", type=float)
@@ -314,6 +318,8 @@ def create_parser():
     parser.add_argument("--joint_bias_context_scale_min", help="min joint bias for context scaling", type=float)
     parser.add_argument("--joint_bias_context_scale_max", help="max joint bias for context scaling", type=float)
 
+    parser.add_argument("--no_joint_pos_clamp", help="do not clamp joint pos actions", action="store_true")
+
     # task
     parser.add_argument("--target_x_vel_min", help="min target x velocity", type=float)
     parser.add_argument("--target_x_vel_max", help="max target x velocity", type=float)
@@ -321,12 +327,27 @@ def create_parser():
     parser.add_argument("--target_y_vel_min", help="min target y velocity", type=float)
     parser.add_argument("--target_y_vel_max", help="max target y velocity", type=float)
 
+    parser.add_argument("--target_heading_min", help="min target heading", type=float)
+    parser.add_argument("--target_heading_max", help="max target heading", type=float)
+
+    parser.add_argument("--rel_standing_envs", help="percent of envs with stand task", type=float)
+
+    parser.add_argument("--resample_time_min", help="min resample time", type=float)
+    parser.add_argument("--resample_time_max", help="max resample time", type=float)
+
+    parser.add_argument("--start_yaw_min", help="min starting yaw", type=float)
+    parser.add_argument("--start_yaw_max", help="max starting yaw", type=float)
+
     parser.add_argument("--disable_self_collisions", help="disable self collisions", action="store_true")
     parser.add_argument("--disable_obs_noise", help="disable observation noise", action="store_true")
+    parser.add_argument("--no_terminate_contacts", help="no termination for contacts", action="store_true")
+
+    # display
+    parser.add_argument("--display_mode", help="activate display mode for videos", action="store_true")
     parser.add_argument(
-        "--no_terminate_base_height", help="exclude termination for low base height", action="store_true"
+        "--display_type", help="camera display type", type=str, default="world", choices=["world", "zoom", "follow"]
     )
-    parser.add_argument("--base_height_terminate_thresh", help="base height termination threshold", type=float)
+    parser.add_argument("--display_resolution", help="display resolution", type=int)
 
     return parser
 
@@ -344,6 +365,8 @@ def parse_custom_inputs_cfg(task_name: str, id_context: str, args_cli: argparse.
     # terrain roughness
     if args_cli.terrain_roughness_cm is not None:
         inputs_cfg.terrain_roughness_cm = args_cli.terrain_roughness_cm
+    if args_cli.terrain_slope_degrees is not None:
+        inputs_cfg.terrain_slope_degrees = args_cli.terrain_slope_degrees
     if args_cli.enable_height_scan:
         inputs_cfg.height_scan = True
 
@@ -357,6 +380,8 @@ def parse_custom_inputs_cfg(task_name: str, id_context: str, args_cli: argparse.
             inputs_cfg.action_mult_indices = [[4], [5], [6], [7]]
         elif args_cli.frozen_joint_type == "calf":
             inputs_cfg.action_mult_indices = [[8], [9], [10], [11]]
+        elif args_cli.frozen_joint_type == "all":
+            inputs_cfg.action_mult_indices = [[0], [1], [2], [3], [4], [5], [6], [7], [8], [9], [10], [11]]
 
     # base mass
     if args_cli.base_mass_min is not None:
@@ -399,7 +424,14 @@ def parse_custom_inputs_cfg(task_name: str, id_context: str, args_cli: argparse.
     if args_cli.motor_strength_mult_context_scale_max is not None:
         inputs_cfg.motor_strength_mult_context_scale_max = args_cli.motor_strength_mult_context_scale_max
 
+    if args_cli.motor_Kp is not None:
+        inputs_cfg.motor_Kp = args_cli.motor_Kp
+    if args_cli.motor_Kd is not None:
+        inputs_cfg.motor_Kd = args_cli.motor_Kd
+
     # action mult
+    inputs_cfg.hip_scale_mult = args_cli.hip_scale_mult
+
     if args_cli.action_mult_indices is not None:
         inputs_cfg.action_mult_indices = args_cli.action_mult_indices
     if args_cli.action_mult_min is not None:
@@ -429,6 +461,9 @@ def parse_custom_inputs_cfg(task_name: str, id_context: str, args_cli: argparse.
     if args_cli.joint_bias_context_scale_max is not None:
         inputs_cfg.joint_bias_context_scale_max = args_cli.joint_bias_context_scale_max
 
+    if args_cli.no_joint_pos_clamp:
+        inputs_cfg.joint_pos_clamp = False
+
     # adversary
     inputs_cfg = set_adversary_magnitude_by_alg(inputs_cfg, args_cli, eval_mode)
 
@@ -443,14 +478,50 @@ def parse_custom_inputs_cfg(task_name: str, id_context: str, args_cli: argparse.
     if args_cli.target_y_vel_max is not None:
         inputs_cfg.target_y_vel_max = args_cli.target_y_vel_max
 
+    if args_cli.target_heading_min is not None:
+        inputs_cfg.target_heading_min = args_cli.target_heading_min
+    else:
+        if eval_mode:
+            inputs_cfg.target_heading_min = 0.0
+    if args_cli.target_heading_max is not None:
+        inputs_cfg.target_heading_max = args_cli.target_heading_max
+    else:
+        if eval_mode:
+            inputs_cfg.target_heading_max = 0.0
+
+    if args_cli.rel_standing_envs is not None:
+        inputs_cfg.rel_standing_envs = args_cli.rel_standing_envs
+    else:
+        if eval_mode:
+            inputs_cfg.rel_standing_envs = 0.0
+
+    if args_cli.resample_time_min is not None:
+        inputs_cfg.resample_time_min = args_cli.resample_time_min
+    else:
+        if eval_mode:
+            inputs_cfg.resample_time_min = 1e6
+    if args_cli.resample_time_max is not None:
+        inputs_cfg.resample_time_max = args_cli.resample_time_max
+    else:
+        if eval_mode:
+            inputs_cfg.resample_time_max = 1e6
+
+    if args_cli.start_yaw_min is not None:
+        inputs_cfg.start_yaw_min = args_cli.start_yaw_min
+    if args_cli.start_yaw_max is not None:
+        inputs_cfg.start_yaw_max = args_cli.start_yaw_max
+
     if args_cli.disable_self_collisions:
         inputs_cfg.activate_self_collisions = False
     if args_cli.disable_obs_noise:
         inputs_cfg.disable_obs_noise = True
-    if args_cli.no_terminate_base_height:
-        inputs_cfg.terminate_base_height = False
-    if args_cli.base_height_terminate_thresh is not None:
-        inputs_cfg.base_height_terminate_thresh = args_cli.base_height_terminate_thresh
+    if args_cli.no_terminate_contacts:
+        inputs_cfg.terminate_contacts = False
+
+    inputs_cfg.display_mode = args_cli.display_mode
+    inputs_cfg.display_type = args_cli.display_type
+    if args_cli.display_resolution is not None:
+        inputs_cfg.display_resolution = args_cli.display_resolution
 
     return inputs_cfg
 
@@ -470,6 +541,7 @@ def set_adversary_magnitude_by_alg(inputs_cfg, args_cli, eval_mode):
 
 def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
     """Update agent config based on algorithm."""
+    agent_cfg.alg_name = args_cli.alg_name
     agent_cfg.adapt_train_only = False
     agent_cfg.robust_train_only = False
     agent_cfg.policy.act_inference_robust = False
@@ -482,8 +554,10 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
     agent_cfg.finetune_iterations = args_cli.finetune_iterations
     agent_cfg.policy.adversary_prob = args_cli.adversary_prob
     agent_cfg.policy.robust_use_latent_actor = args_cli.robust_use_latent_actor
-    agent_cfg.policy.robust_use_latent_critic = args_cli.robust_use_latent_critic
-    agent_cfg.policy.context_encoder_stochastic = args_cli.context_encoder_stochastic
+    if args_cli.no_robust_use_latent_critic:
+        agent_cfg.policy.robust_use_latent_critic = False
+    else:
+        agent_cfg.policy.robust_use_latent_critic = True
 
     if eval_mode:
         agent_cfg.policy.act_from_context = False
@@ -524,7 +598,7 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
         else:
             agent_cfg.robust_train_only = True
 
-    elif args_cli.alg_name.startswith("contextual_rl"):
+    elif args_cli.alg_name == "contextual_rl":
         agent_cfg.policy.adversary_prob = 0.0
 
         if eval_mode:
@@ -532,10 +606,7 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
         else:
             agent_cfg.adapt_train_only = True
 
-        if args_cli.alg_name == "contextual_rl_noise":
-            agent_cfg.policy.context_encoder_stochastic = True
-
-    elif args_cli.alg_name.startswith("domain_rand"):
+    elif args_cli.alg_name == "domain_rand":
         agent_cfg.policy.adversary_prob = 0.0
         if not agent_cfg.policy.robust_use_latent_actor:
             agent_cfg.finetune_iterations = 0
@@ -544,9 +615,6 @@ def update_agent_cfg_by_alg(agent_cfg, args_cli, eval_mode):
             agent_cfg.policy.act_inference_robust = True
         else:
             agent_cfg.robust_train_only = True
-
-        if args_cli.alg_name == "domain_rand_priv":
-            agent_cfg.policy.robust_use_latent_critic = True
 
     else:
         raise ValueError("invalid alg_name")
@@ -652,6 +720,7 @@ def parse_agent_cfg(task_name: str, args_cli: argparse.Namespace, eval_mode: boo
     agent_cfg.policy.obs_history_length = args_cli.obs_history_length
     agent_cfg.policy.context_encoder_clamp = args_cli.context_encoder_clamp
     agent_cfg.policy.context_encoder_clamp_value = args_cli.context_encoder_clamp_value
+    agent_cfg.policy.context_encoder_stochastic = args_cli.context_encoder_stochastic
     agent_cfg.policy.context_encoder_noise_std = args_cli.context_encoder_noise_std
 
     agent_cfg.policy.history_epinet_output_type = args_cli.history_epinet_output_type
@@ -679,6 +748,13 @@ def parse_agent_cfg(task_name: str, args_cli: argparse.Namespace, eval_mode: boo
 
     agent_cfg.uncertainty_metric_full_only = args_cli.uncertainty_metric_full_only
     agent_cfg.uncertainty_metric_adapt_only = args_cli.uncertainty_metric_adapt_only
+
+    # -- hardware inputs
+    agent_cfg.hip_scale_mult = args_cli.hip_scale_mult
+    if args_cli.no_joint_pos_clamp:
+        agent_cfg.joint_pos_clamp = False
+    else:
+        agent_cfg.joint_pos_clamp = True
 
     # class names
     agent_cfg.policy.class_name = "GRAMActorCritic"

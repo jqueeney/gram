@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+# Copyright (C) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 # Copyright (C) 2022-2024, The Isaac Lab Project Developers
 #
 # SPDX-License-Identifier: BSD-3-Clause

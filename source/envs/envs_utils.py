@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+# Copyright (C) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 # Copyright (C) 2022-2024, The Isaac Lab Project Developers
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -19,7 +19,7 @@ from omni.isaac.lab.managers.action_manager import ActionTerm
 from omni.isaac.lab.utils import configclass
 
 if TYPE_CHECKING:
-    from omni.isaac.lab.envs import ManagerBasedRLEnv
+    from omni.isaac.lab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 
 ################################################################################
 # Action terms
@@ -37,6 +37,11 @@ class ScaledJointPositionAction(mdp.JointPositionAction):
     def __init__(self, cfg: ScaledJointPositionActionCfg, env: ManagerBasedRLEnv):
         # initialize the action term
         super().__init__(cfg, env)
+
+        # scale with hip mult
+        scale_vec = torch.ones_like(self._offset) * self.cfg.scale
+        scale_vec[:, :4] *= self.cfg.hip_scale_mult
+        self._scale = scale_vec
 
         # default action scale
         self._action_scale = torch.ones((self.num_envs, self.action_dim), dtype=torch.float32, device=self.device)
@@ -107,6 +112,7 @@ class ScaledJointPositionActionCfg(mdp.JointPositionActionCfg):
 
     class_type: type[ActionTerm] = ScaledJointPositionAction
 
+    hip_scale_mult: float = 1.0
     action_mult_indices: list = None
     action_mult_min: float = 1.0
     action_mult_max: float = 1.0
@@ -134,8 +140,8 @@ class ShiftScaleClampJointPositionAction(ScaledJointPositionAction):
         self._set_action_shift()
 
         # action limits
-        self.joint_pos_min = self._asset.data.soft_joint_pos_limits[..., 0]
-        self.joint_pos_max = self._asset.data.soft_joint_pos_limits[..., 1]
+        self.joint_pos_min = self._asset.data.default_joint_limits[..., 0]
+        self.joint_pos_max = self._asset.data.default_joint_limits[..., 1]
 
     def _set_action_shift(self):
         if self.cfg.joint_bias_min < self.cfg.joint_bias_max:
@@ -287,6 +293,48 @@ def adversarial_push_by_setting_velocity(
 
         # set the velocities into the physics simulation
         asset.write_root_velocity_to_sim(vel_w, env_ids=env_ids)
+
+
+# ------------------------------------------------------------------------------#
+
+
+def reset_joints_train(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    stand_range: tuple[float, float],
+    position_delta_range: tuple[float, float],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Reset the robot joints to various levels of standing plus small additive noise."""
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    # get default joint state
+    default_joint_pos = asset.data.default_joint_pos[env_ids].clone()
+    joint_vel = asset.data.default_joint_vel[env_ids].clone()
+
+    down_joint_pos = torch.tensor(
+        [[0.10, -0.10, 0.10, -0.10, 1.36, 1.36, 1.36, 1.36, -2.65, -2.65, -2.65, -2.65]],
+        device=default_joint_pos.device,
+    )
+
+    low, high = stand_range
+    stand_weight = torch.rand(*(default_joint_pos.shape[0], 1), device=default_joint_pos.device) * (high - low) + low
+
+    low, high = position_delta_range
+    add_joint_pos = torch.rand(*default_joint_pos.shape, device=default_joint_pos.device) * (high - low) + low
+
+    joint_pos = down_joint_pos + stand_weight * (default_joint_pos - down_joint_pos)
+    joint_pos += add_joint_pos
+
+    # clamp joint pos to limits
+    joint_pos_limits = asset.data.soft_joint_pos_limits[env_ids]
+    joint_pos = joint_pos.clamp_(joint_pos_limits[..., 0], joint_pos_limits[..., 1])
+    # clamp joint vel to limits
+    joint_vel_limits = asset.data.soft_joint_vel_limits[env_ids]
+    joint_vel = joint_vel.clamp_(-joint_vel_limits, joint_vel_limits)
+
+    # set into the physics simulation
+    asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
 
 
 ################################################################################

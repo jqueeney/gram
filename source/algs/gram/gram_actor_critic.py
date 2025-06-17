@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Mitsubishi Electric Research Laboratories (MERL)
+# Copyright (C) 2024-2025 Mitsubishi Electric Research Laboratories (MERL)
 # Copyright (C) 2021 ETH Zurich, NVIDIA CORPORATION
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -69,7 +69,7 @@ class GRAMActorCritic(nn.Module):
         act_inference_adapt=False,
         act_inference_robust=False,
         robust_use_latent_actor=False,
-        robust_use_latent_critic=False,
+        robust_use_latent_critic=True,
         **kwargs,
     ):
         super().__init__()
